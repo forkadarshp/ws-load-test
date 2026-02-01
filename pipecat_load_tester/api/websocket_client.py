@@ -12,13 +12,15 @@ from websockets import ConnectionClosed
 
 from ..frames_pb2 import Frame
 from ..audio import AudioGenerator
+from ..config import PipecatConfig
 
 
 class WebSocketSession:
     """Represents a single WebSocket session to Pipecat bot."""
 
-    def __init__(self, bot_host: str):
+    def __init__(self, bot_host: str, config: Optional[PipecatConfig] = None):
         self.bot_host = bot_host
+        self.config = config or PipecatConfig()
         self.session_id: Optional[str] = None
         self.ws_url: Optional[str] = None
         self.created_at = datetime.now()
@@ -42,19 +44,29 @@ class WebSocketSession:
         """Connects to Pipecat bot with RTVI handshake."""
         try:
             # Step 1: POST /connect
-            self.http_session = aiohttp.ClientSession()
+            timeout = aiohttp.ClientTimeout(total=self.config.connection_timeout)
+            self.http_session = aiohttp.ClientSession(timeout=timeout)
+
             async with self.http_session.post(
-                f"http://{self.bot_host}/connect",
-                json={"rtvi_client_version": "0.4.1"}
+                f"http://{self.bot_host}{self.config.connect_endpoint}",
+                json={"rtvi_client_version": self.config.rtvi_client_version}
             ) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    raise Exception(f"Connect failed: {response.status} - {error_text}")
                 data = await response.json()
                 self.ws_url = data.get("ws_url")
 
             # Step 2: WebSocket connect
-            self.websocket = await websockets.connect(self.ws_url)
+            self.websocket = await websockets.connect(
+                self.ws_url,
+                max_size=self.config.websocket_max_size,
+                ping_interval=self.config.websocket_ping_interval,
+                ping_timeout=self.config.websocket_ping_timeout
+            )
 
             # Step 3: Wait for pipeline to initialize
-            await asyncio.sleep(1.5)
+            await asyncio.sleep(self.config.pipeline_init_delay)
 
             # Step 4: Send client-ready wrapped in MessageFrame (RTVI protocol)
             client_ready = {
@@ -62,7 +74,7 @@ class WebSocketSession:
                 "type": "client-ready",
                 "id": str(uuid4())[:8],
                 "data": {
-                    "version": "0.4.1",
+                    "version": self.config.rtvi_client_version,
                     "about": {
                         "library": "pipecat-testing-api",
                         "library_version": "1.0.0",
@@ -161,14 +173,15 @@ class WebSocketSession:
 
         frames_sent = 0
         total_bytes = 0
+        chunk_interval = self.config.chunk_duration_ms / 1000.0
 
         for chunk in audio_gen.generate_chunks():
             frame = Frame()
             frame.audio.id = self.frame_id
             frame.audio.name = "audio"
             frame.audio.audio = chunk
-            frame.audio.sample_rate = 16000
-            frame.audio.num_channels = 1
+            frame.audio.sample_rate = self.config.sample_rate
+            frame.audio.num_channels = self.config.channels
 
             frame_bytes = frame.SerializeToString()
             await self.websocket.send(frame_bytes)
@@ -177,7 +190,7 @@ class WebSocketSession:
             frames_sent += 1
             total_bytes += len(frame_bytes)
 
-            await asyncio.sleep(0.06)
+            await asyncio.sleep(chunk_interval)
 
         self.frames_sent += frames_sent
         self.bytes_sent += total_bytes
@@ -185,7 +198,7 @@ class WebSocketSession:
 
         return {
             "frames_sent": frames_sent,
-            "duration_ms": frames_sent * 60,
+            "duration_ms": frames_sent * self.config.chunk_duration_ms,
             "bytes_sent": total_bytes
         }
 
@@ -254,9 +267,23 @@ class WebSocketSession:
                 pass
 
         if self.websocket:
-            await self.websocket.close()
+            try:
+                await asyncio.wait_for(
+                    self.websocket.close(),
+                    timeout=self.config.disconnect_timeout
+                )
+            except Exception:
+                pass
+            self.websocket = None
 
         if self.http_session:
-            await self.http_session.close()
+            try:
+                await asyncio.wait_for(
+                    self.http_session.close(),
+                    timeout=self.config.disconnect_timeout
+                )
+            except Exception:
+                pass
+            self.http_session = None
 
         self.status = "closed"

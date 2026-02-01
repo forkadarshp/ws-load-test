@@ -1,5 +1,7 @@
 """FastAPI Testing API for Pipecat voice bot."""
+import os
 from typing import Optional
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,11 +17,41 @@ from .models import (
     CloseSessionResponse,
 )
 from .session_manager import SessionManager
+from ..config import PipecatConfig, get_config
+
+# Global config - loaded on startup
+config: PipecatConfig = None
+session_manager: SessionManager = None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Load config on startup."""
+    global config, session_manager
+
+    # Load config from file specified in env var, or default locations
+    config_path = os.environ.get("PIPECAT_CONFIG")
+    config = get_config(config_path)
+    config.setup_logging()
+
+    session_manager = SessionManager(config)
+
+    print(f"Testing API started with config:")
+    print(f"  Default bot host: {config.host}")
+    print(f"  API host: {config.api_host}:{config.api_port}")
+
+    yield
+
+    # Cleanup on shutdown
+    if session_manager:
+        await session_manager.close_all()
+
 
 app = FastAPI(
     title="Pipecat Testing API",
     description="REST API for testing Pipecat voice bot",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 app.add_middleware(
@@ -30,13 +62,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-session_manager = SessionManager()
-
 
 @app.post("/test/session/start", response_model=StartSessionResponse)
 async def start_session(request: Optional[StartSessionRequest] = None):
-    """Initialize a new test session."""
-    bot_host = request.bot_host if request else "localhost:8000"
+    """Initialize a new test session.
+
+    If bot_host is not provided, uses the default from config.
+    """
+    # Use request bot_host or fall back to config default
+    bot_host = config.host
+    if request and request.bot_host:
+        bot_host = request.bot_host
 
     try:
         session_id = await session_manager.create_session(bot_host)
@@ -136,9 +172,42 @@ async def list_sessions():
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
-    return {"status": "healthy"}
+    return {
+        "status": "healthy",
+        "config": {
+            "default_bot_host": config.host,
+            "api_port": config.api_port
+        }
+    }
+
+
+@app.get("/config")
+async def get_current_config():
+    """Get current configuration."""
+    return {
+        "host": config.host,
+        "pipeline_init_delay": config.pipeline_init_delay,
+        "max_retries": config.max_retries,
+        "session_timeout": config.session_timeout,
+        "max_sessions": config.max_sessions
+    }
+
+
+def run_server(config_path: Optional[str] = None):
+    """Run the API server with optional config file."""
+    import uvicorn
+
+    if config_path:
+        os.environ["PIPECAT_CONFIG"] = config_path
+
+    cfg = get_config(config_path)
+    uvicorn.run(
+        "pipecat_load_tester.api.main:app",
+        host=cfg.api_host,
+        port=cfg.api_port,
+        reload=False
+    )
 
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+    run_server()

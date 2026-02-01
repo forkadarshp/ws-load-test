@@ -1,0 +1,47 @@
+# Pipecat Load Tester Configuration
+# See https://github.com/forkadarshp/ws-load-test for documentation
+
+# Server settings
+server:
+  host: localhost:8000
+  connect_endpoint: /connect
+  rtvi_client_version: "0.4.1"
+
+# Audio settings
+audio:
+  sample_rate: 16000
+  channels: 1
+  chunk_duration_ms: 60
+  # Uncomment to use a custom audio file instead of synthetic sine wave
+  # audio_file: samples/greeting.wav
+
+# Connection settings
+connection:
+  websocket_max_size: 10485760  # 10MB
+  websocket_ping_interval: 20
+  websocket_ping_timeout: 20
+  pipeline_init_delay: 1.5
+  connection_timeout: 30.0
+
+# Retry settings
+retry:
+  max_retries: 3
+  retry_delay: 1.0
+  retry_backoff_multiplier: 2.0
+
+# Test defaults
+test:
+  default_connections: 10
+  default_duration: 60
+  default_output: results.json
+
+# Logging
+logging:
+  log_level: INFO
+
+# API server (for Testing API)
+api:
+  api_host: 0.0.0.0
+  api_port: 8080
+  session_timeout: 300
+  max_sessions: 100
