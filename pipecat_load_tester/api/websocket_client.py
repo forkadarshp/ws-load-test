@@ -8,6 +8,7 @@ from uuid import uuid4
 
 import aiohttp
 import websockets
+from websockets import ConnectionClosed
 
 from ..frames_pb2 import Frame
 from ..audio import AudioGenerator
@@ -146,7 +147,7 @@ class WebSocketSession:
                 if len(self.messages) > 1000:
                     self.messages = self.messages[-1000:]
 
-        except websockets.exceptions.ConnectionClosed:
+        except ConnectionClosed:
             self.status = "disconnected"
         except Exception:
             self.status = "error"

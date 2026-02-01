@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  load-tester:
+    build: .
+    volumes:
+      # Mount results directory
+      - ./results:/results
+      # Mount config file if exists
+      - ./pipecat-config.yaml:/app/pipecat-config.yaml:ro
+      # Mount audio samples if exists
+      - ./samples:/app/samples:ro
+    environment:
+      # Override via environment variables
+      - PIPECAT_HOST=${PIPECAT_HOST:-host.docker.internal:8000}
+      - PIPECAT_LOG_LEVEL=${PIPECAT_LOG_LEVEL:-INFO}
+    # Use host network for easier access to local services
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: ["sustained", "-n", "10", "-d", "30", "-o", "/results/results.json"]
+
+  # Testing API service
+  api:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./samples:/app/samples:ro
+    environment:
+      - PIPECAT_HOST=${PIPECAT_HOST:-host.docker.internal:8000}
+      - PIPECAT_API_HOST=0.0.0.0
+      - PIPECAT_API_PORT=8080
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    entrypoint: ["uvicorn", "pipecat_load_tester.api.main:app", "--host", "0.0.0.0", "--port", "8080"]
