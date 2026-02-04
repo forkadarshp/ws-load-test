@@ -87,20 +87,28 @@ class WebSocketSession:
             await self.websocket.send(frame.SerializeToString())
             self.frame_id += 1
 
-            # Step 5: Wait for bot-ready (comes as protobuf MessageFrame)
-            async for msg in self.websocket:
-                if isinstance(msg, bytes):
-                    resp_frame = Frame()
-                    resp_frame.ParseFromString(msg)
-                    if resp_frame.HasField('message'):
-                        try:
-                            data = json.loads(resp_frame.message.data)
-                            if data.get("type") == "bot-ready":
-                                break
-                            elif data.get("type") == "error":
-                                raise Exception(f"Bot error: {data.get('data', {}).get('message', 'unknown')}")
-                        except json.JSONDecodeError:
-                            pass
+            # Step 5: Wait for bot-ready (optional - some bots don't send it)
+            bot_ready_timeout = 5.0  # seconds
+            bot_ready_received = False
+            try:
+                async with asyncio.timeout(bot_ready_timeout):
+                    async for msg in self.websocket:
+                        if isinstance(msg, bytes):
+                            resp_frame = Frame()
+                            resp_frame.ParseFromString(msg)
+                            if resp_frame.HasField('message'):
+                                try:
+                                    data = json.loads(resp_frame.message.data)
+                                    if data.get("type") == "bot-ready":
+                                        bot_ready_received = True
+                                        break
+                                    elif data.get("type") == "error":
+                                        raise Exception(f"Bot error: {data.get('data', {}).get('message', 'unknown')}")
+                                except json.JSONDecodeError:
+                                    pass
+            except asyncio.TimeoutError:
+                # Bot didn't send bot-ready, but connection is still valid
+                pass
 
             # Start receive loop
             self._receive_task = asyncio.create_task(self._receive_loop())

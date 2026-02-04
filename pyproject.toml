@@ -19,6 +19,8 @@ classifiers = [
     "Topic :: System :: Networking",
 ]
 dependencies = [
+    "pipecat-ai[websocket,silero,deepgram,openai,,runner]",
+    "pipecat-ai-cli"
     "websockets>=12.0",
     "aiohttp>=3.9.0",
     "protobuf>=4.25.0",

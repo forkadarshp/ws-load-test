@@ -3,7 +3,7 @@
 
 # Server settings
 server:
-  host: localhost:8000
+  host: localhost:7860
   connect_endpoint: /connect
   rtvi_client_version: "0.4.1"
 
